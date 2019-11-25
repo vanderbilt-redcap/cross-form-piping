@@ -8,6 +8,44 @@ use ExternalModules\ExternalModules;
 class CrossFormPipingExternalModule extends AbstractExternalModule
 {
     function redcap_data_entry_form($project_id, $record, $instrument, $event_id, $group_id, $repeat_instance = 1) {
+        /*$source = $this->getProjectSetting('source');
+        $instanceMatch = $this->getProjectSetting('instance-match');
+        $destinations = $this->getProjectSetting('destination');
+        $destValue = $this->getProjectSetting('dest-value');
+        $recordData = \Records::getData($project_id,'array',array($record));
+        $project = new \Project($project_id);
+        echo "<pre>";
+        print_r($source);
+        echo "</pre>";
+        echo "<pre>";
+        print_r($instanceMatch);
+        echo "</pre>";
+        echo "<pre>";
+        print_r($destinations);
+        echo "</pre>";
+        echo "<pre>";
+        print_r($destValue);
+        echo "</pre>";
+        foreach ($source as $sIndex => $src) {
+            $saveList = array();
+                foreach ($destinations[$sIndex] as $index => $destinationField) {
+                    $destinationInstrument = $project->metadata[$destinationField]['form_name'];
+                    list($stringsToReplace,$fieldNamesReplace,$operators,$addList) = $this->parseLogicString($destValue[$sIndex][$index]);
+                    echo "List of things:<br/>";
+                    echo "<pre>";
+                    print_r($stringsToReplace);
+                    echo "</pre>";
+                    echo "<pre>";
+                    print_r($fieldNamesReplace);
+                    echo "</pre>";
+                    echo "<pre>";
+                    print_r($operators);
+                    echo "</pre>";
+                    echo "<pre>";
+                    print_r($addList);
+                    echo "</pre>";
+                }
+        }*/
         /*$recordData = \Records::getData($project_id,'array',array($record));
         $project = new \Project($project_id);
         $string = "[date_enrolled]+test-string";
@@ -53,13 +91,18 @@ class CrossFormPipingExternalModule extends AbstractExternalModule
             $saveList = array();
             if (isset($_POST[$src]) && $_POST[$src] != "") {
                 foreach ($destinations[$sIndex] as $index => $destinationField) {
+                    $destinationInstrument = $project->metadata[$destinationField]['form_name'];
                     list($stringsToReplace,$fieldNamesReplace,$operators,$addList) = $this->parseLogicString($destValue[$sIndex][$index]);
                     $currentValue = "";
                     // If all the data arrays are somehow empty, that is invalid
                     if (empty($stringsToReplace) && empty($fieldNamesReplace) && empty($addList)) continue;
                     foreach ($addList as $aIndex => $addValue) {
                         $replaceValue = "";
-                        if (in_array($addValue,$stringsToReplace)) {
+                        if (strpos($addValue,":survey_link") !== false) {
+                            $splitForm = explode(":",$fieldNamesReplace[array_keys($stringsToReplace,$addValue)[0]]);
+                            $replaceValue = $this->generateSurveyLink($project,$splitForm[0],$record,$event_id,$repeat_instance,$instanceMatch[$sIndex],$recordData);
+                        }
+                        else if (in_array($addValue,$stringsToReplace)) {
                             $addField = $fieldNamesReplace[array_keys($stringsToReplace,$addValue)[0]];
                             $replaceInstrument = $project->metadata[$addField]['form_name'];
                             if ($project->isRepeatingForm($event_id,$replaceInstrument)) {
@@ -79,7 +122,6 @@ class CrossFormPipingExternalModule extends AbstractExternalModule
                             $currentValue .= $replaceValue;
                         }
                     }
-                    $destinationInstrument = $project->metadata[$destinationField]['form_name'];
 
                     if ($project->isRepeatingForm($event_id,$destinationInstrument)) {
                         if ($instanceMatch[$sIndex] != "") {
@@ -99,7 +141,6 @@ class CrossFormPipingExternalModule extends AbstractExternalModule
                         $changes[$recordID]['redcap_repeat_instrument'] = $notifForm;
                         $changes[$recordID][$this->getProjectSetting('unique-user')] = $user;*/
                         $result = \REDCap::saveData($project_id, 'array', $saveList, 'overwrite');
-
                         if (!empty($result['errors']) && $result['errors'] != "") {
                             $errorString = "";
                             foreach ($result['errors'] as $error) {
@@ -321,5 +362,43 @@ class CrossFormPipingExternalModule extends AbstractExternalModule
                 $returnString = '';
         }
         return $returnString;
+    }
+
+    function generateSurveyLink(\Project $project, $formName, $record, $event_id, $repeat_instance, $instanceMatch, $recordData) {
+        $surveyLink = "";
+        $maxInstance = $repeat_instance;
+
+        if (property_exists($project,'forms') && in_array($formName,array_keys($project->forms))) {
+            if ($project->isRepeatingForm($event_id,$formName)) {
+                if ($instanceMatch != "") {
+                    $saveList[$record]['repeat_instances'][$event_id][$formName][$maxInstance][$formName."_complete"] = 0;
+                }
+                else {
+                    $maxInstance = (max(array_keys($recordData[$record]['repeat_instances'][$event_id][$formName])) ? max(array_keys($recordData[$record]['repeat_instances'][$event_id][$formName])) : 1);
+                    $saveList[$record]['repeat_instances'][$event_id][$formName][$maxInstance][$formName."_complete"] = 0;
+                }
+            }
+            else {
+                $saveList[$record][$event_id][$formName."_complete"] = 0;
+            }
+            if (!empty($saveList)) {
+                /*$changes[$recordID]['redcap_repeat_instance'] = $instance;
+                $changes[$recordID]['redcap_repeat_instrument'] = $notifForm;
+                $changes[$recordID][$this->getProjectSetting('unique-user')] = $user;*/
+                $result = \REDCap::saveData($project->project_id, 'array', $saveList, 'overwrite');
+                if (!empty($result['errors']) && $result['errors'] != "") {
+                    $errorString = "";
+                    foreach ($result['errors'] as $error) {
+                        $errorString .= $error."<br/>";
+                    }
+                    throw new \Exception($errorString);
+                }
+                else {
+                    $surveyLink = \REDCap::getSurveyLink($record,$formName,$event_id,$maxInstance,$project->project_id);
+                }
+            }
+        }
+        //ExternalModules::exitAfterHook();
+        return $surveyLink;
     }
 }
